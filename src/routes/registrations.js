@@ -14,7 +14,6 @@ const eventFor = async (id) => {
   return e;
 };
 
-
 router.post(
   "/events/:eventId/registrations",
   requireAuth,

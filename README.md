@@ -30,3 +30,15 @@ See `tickets/README.md` for exact file ownership, branch names, dependency order
 - Add CSRF defenses for cookie-authenticated mutation endpoints, production cookie configuration, structured logging, monitoring and security review.
 - Add MongoDB integration tests against a replica set, concurrency tests, permission tests, and end-to-end UI tests.
 - Establish a secure admin bootstrap procedure and configure deployment secrets.
+
+Backend structure:
+
+```text
+src/
+├── server.js
+├── routes/
+├── controllers/
+├── services/
+├── validators/
+└── models/
+```
