@@ -43,6 +43,24 @@ router.get(
     if (req.query.status === "upcoming") filter.start = { $gte: new Date() };
     if (req.query.status === "past") filter.end = { $lt: new Date() };
 
+const get = async (id) => {
+  if (!validId(id)) throw fail(400, "Invalid event ID");
+  const e = await Event.findById(id);
+  if (!e) throw fail(404, "Event not found");
+  return e;
+};
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const page = Math.max(1, Math.min(100000, Number(req.query.page) || 1)),
+      limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
+    const filter = { visibility: "Published" };
+    if (req.query.category && req.query.category !== "All categories")
+      filter.category = req.query.category;
+    if (req.query.search)
+      filter.$text = { $search: String(req.query.search).slice(0, 100) };
+    if (req.query.status === "upcoming") filter.start = { $gte: new Date() };
+    if (req.query.status === "past") filter.end = { $lt: new Date() };
     const [events, total] = await Promise.all([
       Event.find(filter)
         .sort({ start: 1 })
@@ -56,6 +74,9 @@ router.get(
   }),
 );
 
+    res.json({ events, total, page, pages: Math.ceil(total / limit) });
+  }),
+);
 router.get(
   "/:eventId",
   asyncHandler(async (req, res) => {
@@ -66,6 +87,9 @@ router.get(
   }),
 );
 
+    res.json({ event });
+  }),
+);
 router.post(
   "/",
   requireAuth,
@@ -76,6 +100,8 @@ router.post(
       throw fail(400, "Invalid event dates");
     }
 
+    if (body.end <= body.start || body.deadline > body.start)
+      throw fail(400, "Invalid event dates");
     const event = await Event.create({ ...body, ownerId: req.user._id });
     await AuditLog.create({
       actorId: req.user._id,
@@ -87,6 +113,9 @@ router.post(
   }),
 );
 
+    res.status(201).json({ event });
+  }),
+);
 router.patch(
   "/:eventId",
   requireAuth,
@@ -104,6 +133,8 @@ router.patch(
       throw fail(400, "Invalid event dates or capacity");
     }
 
+    )
+      throw fail(400, "Invalid event dates or capacity");
     await event.save();
     await AuditLog.create({
       actorId: req.user._id,
@@ -116,6 +147,9 @@ router.patch(
   }),
 );
 
+    res.json({ event });
+  }),
+);
 router.post(
   "/:eventId/publish",
   requireAuth,
@@ -135,5 +169,8 @@ router.post(
   }),
 );
 
+    res.json({ event });
+  }),
+);
 export { get as getEvent };
 export default router;
