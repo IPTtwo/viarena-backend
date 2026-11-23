@@ -4,6 +4,7 @@ import Event from "../models/Event.js";
 import AuditLog from "../models/AuditLog.js";
 import { requireAuth, requireRole, canManage } from "../middleware/auth.js";
 import { asyncHandler, fail, validId } from "../utils/http.js";
+
 const router = Router();
 const schema = z.object({
   title: z.string().min(3).max(200),
@@ -16,6 +17,32 @@ const schema = z.object({
   capacity: z.number().int().positive(),
   cover: z.string().max(2000).default(""),
 });
+
+const get = async (id) => {
+  if (!validId(id)) throw fail(400, "Invalid event ID");
+
+  const event = await Event.findById(id);
+  if (!event) throw fail(404, "Event not found");
+
+  return event;
+};
+
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const page = Math.max(1, Math.min(100000, Number(req.query.page) || 1));
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
+    const filter = { visibility: "Published" };
+
+    if (req.query.category && req.query.category !== "All categories") {
+      filter.category = req.query.category;
+    }
+    if (req.query.search) {
+      filter.$text = { $search: String(req.query.search).slice(0, 100) };
+    }
+    if (req.query.status === "upcoming") filter.start = { $gte: new Date() };
+    if (req.query.status === "past") filter.end = { $lt: new Date() };
+
 const get = async (id) => {
   if (!validId(id)) throw fail(400, "Invalid event ID");
   const e = await Event.findById(id);
@@ -42,6 +69,11 @@ router.get(
         .lean(),
       Event.countDocuments(filter),
     ]);
+
+    res.json({ events, total, page, pages: Math.ceil(total / limit) });
+  }),
+);
+
     res.json({ events, total, page, pages: Math.ceil(total / limit) });
   }),
 );
@@ -50,6 +82,11 @@ router.get(
   asyncHandler(async (req, res) => {
     const event = await get(req.params.eventId);
     if (event.visibility !== "Published") throw fail(404, "Event not found");
+
+    res.json({ event });
+  }),
+);
+
     res.json({ event });
   }),
 );
@@ -59,6 +96,10 @@ router.post(
   requireRole("Organizer"),
   asyncHandler(async (req, res) => {
     const body = schema.parse(req.body);
+    if (body.end <= body.start || body.deadline > body.start) {
+      throw fail(400, "Invalid event dates");
+    }
+
     if (body.end <= body.start || body.deadline > body.start)
       throw fail(400, "Invalid event dates");
     const event = await Event.create({ ...body, ownerId: req.user._id });
@@ -67,6 +108,11 @@ router.post(
       eventId: event._id,
       action: "event.create",
     });
+
+    res.status(201).json({ event });
+  }),
+);
+
     res.status(201).json({ event });
   }),
 );
@@ -76,12 +122,17 @@ router.patch(
   asyncHandler(async (req, res) => {
     const event = await get(req.params.eventId);
     if (!canManage(event, req.user, "edit")) throw fail(403, "Forbidden");
+
     const updates = schema.partial().strict().parse(req.body);
     Object.assign(event, updates);
     if (
       event.end <= event.start ||
       event.deadline > event.start ||
       event.capacity < event.registeredCount
+    ) {
+      throw fail(400, "Invalid event dates or capacity");
+    }
+
     )
       throw fail(400, "Invalid event dates or capacity");
     await event.save();
@@ -91,6 +142,11 @@ router.patch(
       action: "event.update",
       details: { fields: Object.keys(updates) },
     });
+
+    res.json({ event });
+  }),
+);
+
     res.json({ event });
   }),
 );
@@ -100,6 +156,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const event = await get(req.params.eventId);
     if (!canManage(event, req.user, "publish")) throw fail(403, "Forbidden");
+
     event.visibility = "Published";
     await event.save();
     await AuditLog.create({
@@ -107,6 +164,11 @@ router.post(
       eventId: event._id,
       action: "event.publish",
     });
+
+    res.json({ event });
+  }),
+);
+
     res.json({ event });
   }),
 );

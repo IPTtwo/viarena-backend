@@ -15,6 +15,9 @@ const schema = new mongoose.Schema(
       enum: ["Draft", "Published"],
       default: "Draft",
     },
+
+
+    
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
