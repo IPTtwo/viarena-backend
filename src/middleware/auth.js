@@ -27,20 +27,22 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
   next();
 });
 export const requireRole = (role) => (req, _res, next) =>
-  req.user?.roles.includes(role) ? next() : next(fail(403, "Forbidden"));
+  req.user?.roles.some((value) => value === role || value === "Admin")
+    ? next()
+    : next(fail(403, "Forbidden"));
 export function canManage(event, user, permission = "edit") {
   if (!user) return false;
   const equivalent = {
-    edit: "manage_event",
-    publish: "manage_event",
-    viewRegistrations: "manage_registrations",
-    manageRegistrations: "manage_registrations",
+    edit: ["edit", "manage_event"],
+    publish: ["publish", "manage_event"],
+    viewRegistrations: ["viewRegistrations", "manage_registrations", "manage_teams", "manage_participation"],
+    manageRegistrations: ["manageRegistrations", "manage_registrations"],
   };
   if (user.roles.includes("Admin")) return true;
-  if (String(event.ownerId) === String(user._id)) return true;
-  return event.coOrganizers.some(
+  if (String(event.ownerId) === String(user._id) && user.roles.includes("Organizer")) return true;
+  return !!event.coOrganizers?.some(
     (c) =>
       String(c.userId) === String(user._id) &&
-      (c.permissions.includes(permission) || c.permissions.includes(equivalent[permission])),
+      c.permissions.some((value) => (equivalent[permission] || [permission]).includes(value)),
   );
 }
