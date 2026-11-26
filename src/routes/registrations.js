@@ -1,48 +1,62 @@
-import { Router } from "express";
-import mongoose from "mongoose";
-import Event from "../models/Event.js";
-import Registration from "../models/Registration.js";
-import AuditLog from "../models/AuditLog.js";
-import { requireAuth, canManage } from "../middleware/auth.js";
-import { asyncHandler, fail, validId } from "../utils/http.js";
+import { Router } from 'express';
+import mongoose from 'mongoose';
+import Event from '../models/Event.js';
+import Registration from '../models/Registration.js';
+import AuditLog from '../models/AuditLog.js';
+import { Team, Task, Attendance } from '../models/Workspace.js';
+import { requireAuth, canManage } from '../middleware/auth.js';
+import { asyncHandler, fail, validId } from '../utils/http.js';
 
 const router = Router();
-const eventFor = async (id) => {
-  if (!validId(id)) throw fail(400, "Invalid event ID");
-  const e = await Event.findById(id);
-  if (!e) throw fail(404, "Event not found");
+const eventFor = async (id, session = null) => {
+  if (!validId(id)) throw fail(400, 'Invalid event ID');
+  const e = await Event.findById(id).session(session);
+  if (!e) throw fail(404, 'Event not found');
   return e;
+};
+const removeMembership = async (eventId, userId, session) => {
+  await Team.updateMany(
+    { eventId, memberIds: userId },
+    { $pull: { memberIds: userId, handlerIds: userId } },
+    { session },
+  );
+  await Team.updateMany(
+    { eventId, managerId: userId },
+    { $set: { managerId: null } },
+    { session },
+  );
+  await Task.deleteMany({ eventId, assigneeId: userId }, { session });
+  await Attendance.deleteMany({ eventId, userId }, { session });
 };
 
 router.post(
-  "/events/:eventId/registrations",
+  '/events/:eventId/registrations',
   requireAuth,
   asyncHandler(async (req, res) => {
     const session = await mongoose.startSession();
     let registration;
     try {
       await session.withTransaction(async () => {
-        const event = await eventFor(req.params.eventId);
+        const event = await eventFor(req.params.eventId, session);
         if (
-          event.visibility !== "Published" ||
+          event.visibility !== 'Published' ||
           event.deadline < new Date() ||
           event.start < new Date()
         )
-          throw fail(409, "Registration closed");
+          throw fail(409, 'Registration closed');
         const existing = await Registration.findOne({
           eventId: event._id,
           userId: req.user._id,
         }).session(session);
-        if (existing?.status === "Registered")
-          throw fail(409, "Already registered");
+        if (existing?.status === 'Registered') throw fail(409, 'Already registered');
         const update = await Event.updateOne(
           { _id: event._id, registeredCount: { $lt: event.capacity } },
           { $inc: { registeredCount: 1 } },
           { session },
         );
-        if (update.modifiedCount !== 1) throw fail(409, "Event full");
+        if (update.modifiedCount !== 1) throw fail(409, 'Event full');
         if (existing) {
-          existing.status = "Registered";
+          existing.status = 'Registered';
           await existing.save({ session });
           registration = existing;
         } else {
@@ -59,20 +73,21 @@ router.post(
   }),
 );
 router.delete(
-  "/events/:eventId/registrations/me",
+  '/events/:eventId/registrations/me',
   requireAuth,
   asyncHandler(async (req, res) => {
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
-        const event = await eventFor(req.params.eventId);
-        if (event.start <= new Date()) throw fail(409, "Event already started");
+        const event = await eventFor(req.params.eventId, session);
+        if (event.start <= new Date()) throw fail(409, 'Event already started');
         const r = await Registration.findOneAndUpdate(
-          { eventId: event._id, userId: req.user._id, status: "Registered" },
-          { $set: { status: "Cancelled" } },
+          { eventId: event._id, userId: req.user._id, status: 'Registered' },
+          { $set: { status: 'Cancelled' } },
           { new: true, session },
         );
-        if (!r) throw fail(404, "Active registration not found");
+        if (!r) throw fail(404, 'Active registration not found');
+        await removeMembership(event._id, req.user._id, session);
         await Event.updateOne(
           { _id: event._id },
           { $inc: { registeredCount: -1 } },
@@ -82,47 +97,44 @@ router.delete(
     } finally {
       await session.endSession();
     }
-    res.json({ message: "Registration cancelled" });
+    res.json({ message: 'Registration cancelled' });
   }),
 );
 router.get(
-  "/me/registrations",
+  '/me/registrations',
   requireAuth,
   asyncHandler(async (req, res) => {
     const registrations = await Registration.find({
       userId: req.user._id,
-      status: "Registered",
+      status: 'Registered',
     })
-      .populate("eventId", "title category venue start end visibility")
+      .populate('eventId', 'title category venue start end visibility')
       .sort({ createdAt: -1 });
     res.json({ registrations });
   }),
 );
 router.get(
-  "/events/:eventId/registrations",
+  '/events/:eventId/registrations',
   requireAuth,
   asyncHandler(async (req, res) => {
     const event = await eventFor(req.params.eventId);
-    if (!canManage(event, req.user, "viewRegistrations"))
-      throw fail(403, "Forbidden");
+    if (!canManage(event, req.user, 'viewRegistrations')) throw fail(403, 'Forbidden');
     const registrations = await Registration.find({
       eventId: event._id,
-      status: "Registered",
+      status: 'Registered',
     })
-      .populate("userId", "name studentId")
-      .select("userId status createdAt");
+      .populate('userId', 'name studentId')
+      .select('userId status createdAt');
     res.json({ registrations });
   }),
 );
 router.delete(
-  "/events/:eventId/registrations/:registrationId",
+  '/events/:eventId/registrations/:registrationId',
   requireAuth,
   asyncHandler(async (req, res) => {
     const event = await eventFor(req.params.eventId);
-    if (!canManage(event, req.user, "manageRegistrations"))
-      throw fail(403, "Forbidden");
-    if (!validId(req.params.registrationId))
-      throw fail(400, "Invalid registration ID");
+    if (!canManage(event, req.user, 'manageRegistrations')) throw fail(403, 'Forbidden');
+    if (!validId(req.params.registrationId)) throw fail(400, 'Invalid registration ID');
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
@@ -130,12 +142,13 @@ router.delete(
           {
             _id: req.params.registrationId,
             eventId: event._id,
-            status: "Registered",
+            status: 'Registered',
           },
-          { $set: { status: "Cancelled" } },
+          { $set: { status: 'Cancelled' } },
           { new: true, session },
         );
-        if (!r) throw fail(404, "Active registration not found");
+        if (!r) throw fail(404, 'Active registration not found');
+        await removeMembership(event._id, r.userId, session);
         await Event.updateOne(
           { _id: event._id },
           { $inc: { registeredCount: -1 } },
@@ -147,7 +160,7 @@ router.delete(
               actorId: req.user._id,
               eventId: event._id,
               targetUserId: r.userId,
-              action: "registration.remove",
+              action: 'registration.remove',
             },
           ],
           { session },
@@ -156,7 +169,7 @@ router.delete(
     } finally {
       await session.endSession();
     }
-    res.json({ message: "Registration removed" });
+    res.json({ message: 'Registration removed' });
   }),
 );
 

@@ -1,9 +1,9 @@
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 const schema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
     category: { type: String, required: true },
-    description: { type: String, default: "" },
+    description: { type: String, default: '' },
     venue: { type: String, required: true },
     start: { type: Date, required: true },
     end: { type: Date, required: true },
@@ -12,28 +12,33 @@ const schema = new mongoose.Schema(
     registeredCount: { type: Number, default: 0, min: 0 },
     visibility: {
       type: String,
-      enum: ["Draft", "Published"],
-      default: "Draft",
+      enum: ['Draft', 'Published'],
+      default: 'Draft',
     },
-
-
-    
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: 'User',
       required: true,
       index: true,
     },
     coOrganizers: [
       {
-        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-        permissions: { type: [String], default: ["viewRegistrations"] },
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        permissions: { type: [String], default: ['viewRegistrations'] },
       },
     ],
-    cover: { type: String, default: "" },
+    cover: { type: String, default: '' },
+    eligibility: { type: String, default: '' },
+    stream: {
+      url: { type: String, default: '' },
+      replayUrl: { type: String, default: '' },
+      provider: { type: String, default: 'YouTube' },
+      status: { type: String, enum: ['Scheduled', 'Live', 'Ended'], default: 'Scheduled' },
+      scheduledAt: Date,
+    },
   },
   { timestamps: true },
 );
 schema.index({ visibility: 1, start: 1 });
-schema.index({ title: "text", description: "text" });
-export default mongoose.model("Event", schema);
+schema.index({ title: 'text', description: 'text' });
+export default mongoose.model('Event', schema);

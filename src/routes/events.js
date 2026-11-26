@@ -1,66 +1,39 @@
-import { Router } from "express";
-import { z } from "zod";
-import Event from "../models/Event.js";
-import AuditLog from "../models/AuditLog.js";
-import { requireAuth, requireRole, canManage } from "../middleware/auth.js";
-import { asyncHandler, fail, validId } from "../utils/http.js";
-
+import { Router } from 'express';
+import { z } from 'zod';
+import Event from '../models/Event.js';
+import AuditLog from '../models/AuditLog.js';
+import { optionalAuth, requireAuth, requireRole, canManage } from '../middleware/auth.js';
+import { asyncHandler, fail, validId } from '../utils/http.js';
 const router = Router();
 const schema = z.object({
   title: z.string().min(3).max(200),
   category: z.string().min(2).max(80),
-  description: z.string().max(10000).default(""),
+  description: z.string().max(10000).default(''),
   venue: z.string().min(2).max(200),
   start: z.coerce.date(),
   end: z.coerce.date(),
   deadline: z.coerce.date(),
   capacity: z.number().int().positive(),
-  cover: z.string().max(2000).default(""),
+  cover: z.string().max(1500000).default(''),
+  eligibility: z.string().max(10000).default(''),
 });
-
 const get = async (id) => {
-  if (!validId(id)) throw fail(400, "Invalid event ID");
-
-  const event = await Event.findById(id);
-  if (!event) throw fail(404, "Event not found");
-
-  return event;
-};
-
-router.get(
-  "/",
-  asyncHandler(async (req, res) => {
-    const page = Math.max(1, Math.min(100000, Number(req.query.page) || 1));
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
-    const filter = { visibility: "Published" };
-
-    if (req.query.category && req.query.category !== "All categories") {
-      filter.category = req.query.category;
-    }
-    if (req.query.search) {
-      filter.$text = { $search: String(req.query.search).slice(0, 100) };
-    }
-    if (req.query.status === "upcoming") filter.start = { $gte: new Date() };
-    if (req.query.status === "past") filter.end = { $lt: new Date() };
-
-const get = async (id) => {
-  if (!validId(id)) throw fail(400, "Invalid event ID");
+  if (!validId(id)) throw fail(400, 'Invalid event ID');
   const e = await Event.findById(id);
-  if (!e) throw fail(404, "Event not found");
+  if (!e) throw fail(404, 'Event not found');
   return e;
 };
 router.get(
-  "/",
+  '/',
   asyncHandler(async (req, res) => {
     const page = Math.max(1, Math.min(100000, Number(req.query.page) || 1)),
       limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
-    const filter = { visibility: "Published" };
-    if (req.query.category && req.query.category !== "All categories")
+    const filter = { visibility: 'Published' };
+    if (req.query.category && req.query.category !== 'All categories')
       filter.category = req.query.category;
-    if (req.query.search)
-      filter.$text = { $search: String(req.query.search).slice(0, 100) };
-    if (req.query.status === "upcoming") filter.start = { $gte: new Date() };
-    if (req.query.status === "past") filter.end = { $lt: new Date() };
+    if (req.query.search) filter.$text = { $search: String(req.query.search).slice(0, 100) };
+    if (req.query.status === 'upcoming') filter.start = { $gte: new Date() };
+    if (req.query.status === 'past') filter.end = { $lt: new Date() };
     const [events, total] = await Promise.all([
       Event.find(filter)
         .sort({ start: 1 })
@@ -69,106 +42,93 @@ router.get(
         .lean(),
       Event.countDocuments(filter),
     ]);
-
-    res.json({ events, total, page, pages: Math.ceil(total / limit) });
-  }),
-);
-
     res.json({ events, total, page, pages: Math.ceil(total / limit) });
   }),
 );
 router.get(
-  "/:eventId",
+  '/:eventId',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const event = await get(req.params.eventId);
-    if (event.visibility !== "Published") throw fail(404, "Event not found");
-
-    res.json({ event });
-  }),
-);
-
+    if (event.visibility !== 'Published' && (!req.user || !canManage(event, req.user, 'edit')))
+      throw fail(404, 'Event not found');
     res.json({ event });
   }),
 );
 router.post(
-  "/",
+  '/',
   requireAuth,
-  requireRole("Organizer"),
+  requireRole('Organizer'),
   asyncHandler(async (req, res) => {
     const body = schema.parse(req.body);
-    if (body.end <= body.start || body.deadline > body.start) {
-      throw fail(400, "Invalid event dates");
-    }
-
     if (body.end <= body.start || body.deadline > body.start)
-      throw fail(400, "Invalid event dates");
+      throw fail(400, 'Invalid event dates');
     const event = await Event.create({ ...body, ownerId: req.user._id });
     await AuditLog.create({
       actorId: req.user._id,
       eventId: event._id,
-      action: "event.create",
+      action: 'event.create',
     });
-
-    res.status(201).json({ event });
-  }),
-);
-
     res.status(201).json({ event });
   }),
 );
 router.patch(
-  "/:eventId",
+  '/:eventId',
   requireAuth,
   asyncHandler(async (req, res) => {
     const event = await get(req.params.eventId);
-    if (!canManage(event, req.user, "edit")) throw fail(403, "Forbidden");
-
-    const updates = schema.partial().strict().parse(req.body);
+    if (!canManage(event, req.user, 'edit')) throw fail(403, 'Forbidden');
+    const parsed = schema.partial().strict().parse(req.body);
+    // Defaults belong to creation; PATCH must preserve fields omitted by the caller.
+    const updates = Object.fromEntries(
+      Object.entries(parsed).filter(([key]) => Object.hasOwn(req.body, key)),
+    );
     Object.assign(event, updates);
     if (
       event.end <= event.start ||
       event.deadline > event.start ||
       event.capacity < event.registeredCount
-    ) {
-      throw fail(400, "Invalid event dates or capacity");
-    }
-
     )
-      throw fail(400, "Invalid event dates or capacity");
+      throw fail(400, 'Invalid event dates or capacity');
     await event.save();
     await AuditLog.create({
       actorId: req.user._id,
       eventId: event._id,
-      action: "event.update",
+      action: 'event.update',
       details: { fields: Object.keys(updates) },
     });
-
-    res.json({ event });
-  }),
-);
-
     res.json({ event });
   }),
 );
 router.post(
-  "/:eventId/publish",
+  '/:eventId/unpublish',
   requireAuth,
   asyncHandler(async (req, res) => {
     const event = await get(req.params.eventId);
-    if (!canManage(event, req.user, "publish")) throw fail(403, "Forbidden");
-
-    event.visibility = "Published";
+    if (!canManage(event, req.user, 'publish')) throw fail(403, 'Forbidden');
+    event.visibility = 'Draft';
     await event.save();
     await AuditLog.create({
       actorId: req.user._id,
       eventId: event._id,
-      action: "event.publish",
+      action: 'event.unpublish',
     });
-
     res.json({ event });
   }),
 );
-
+router.post(
+  '/:eventId/publish',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const event = await get(req.params.eventId);
+    if (!canManage(event, req.user, 'publish')) throw fail(403, 'Forbidden');
+    event.visibility = 'Published';
+    await event.save();
+    await AuditLog.create({
+      actorId: req.user._id,
+      eventId: event._id,
+      action: 'event.publish',
+    });
     res.json({ event });
   }),
 );
