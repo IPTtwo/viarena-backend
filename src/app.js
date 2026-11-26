@@ -4,8 +4,8 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { ZodError } from 'zod';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { connectDB } from './config/db.js';
+import { asyncHandler } from './utils/http.js';
 import auth from './routes/auth.js';
 import users from './routes/users.js';
 import events from './routes/events.js';
@@ -42,7 +42,18 @@ app.use(
 );
 app.use(express.json({ limit: '3mb' }));
 app.use(cookieParser());
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+});
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+// Vercel imports the app without running the local port listener.
+if (process.env.VERCEL) {
+  app.use('/api', asyncHandler(async (_req, _res, next) => {
+    await connectDB();
+    next();
+  }));
+}
 app.use(
   '/api/auth',
   rateLimit({
@@ -58,13 +69,6 @@ app.use('/api/events', events);
 app.use('/api', registrations);
 app.use('/api/admin', admin);
 app.use('/api/workspace', workspace);
-const clientDist = fileURLToPath(new URL('../../frontend/client/dist/', import.meta.url));
-if (existsSync(clientDist)) {
-  app.use(express.static(clientDist));
-  app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) =>
-    res.sendFile('index.html', { root: clientDist }),
-  );
-}
 app.use((_req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, _req, res, _next) => {
   if (err instanceof ZodError)
@@ -77,3 +81,4 @@ app.use((err, _req, res, _next) => {
   if (status >= 500) console.error(err);
   res.status(status).json({ error: status >= 500 ? 'Internal server error' : err.message });
 });
+export default app;
