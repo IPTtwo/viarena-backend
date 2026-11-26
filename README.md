@@ -1,44 +1,46 @@
-# ViArena Backend — MERN Phase 2
+# ViArena backend
 
-Separate Express + MongoDB API for the [ViArena frontend](https://github.com/IPTtwo/ViArena). Implements routes in `API_CONTRACTS.md`. **This is a development starter, not a production-certified deployment.** The existing React fixture store must still be migrated to fetch these endpoints.
+Express/Mongoose API for https://github.com/IPTtwo/viarena-frontend. Persists accounts, events, registrations, teams, tasks, schedules, stream links, participation verification, join codes and audit records. Requires Node.js 20+; use 22 or 24 for development.
 
-## Quick start (VS Code terminal)
+## Local setup
 
-1. Install Node.js 20+ and MongoDB Atlas or MongoDB local **replica set** (transactions are required for registrations).
-2. `npm install`
-3. Copy `.env.example` to `.env` and set `MONGODB_URI` and `SESSION_SECRET`.
-4. `npm run dev`
-5. Check `http://localhost:5000/api/health`.
-6. Run `npm test` and `npm run check`.
+Run from this repository root after all integration tickets are merged:
 
-For local MongoDB, configure a single-node replica set (`mongod --replSet rs0 ...` then `rs.initiate()` in mongosh), or use MongoDB Atlas. A standalone MongoDB server will fail transactional registration operations.
-
-## Auth and API behavior
-
-Signup accepts `name`, `email` (default `@adnu.edu.ph`), `studentId`, `password` (8+ chars including uppercase, lowercase and number). Login sets an HTTP-only cookie. Fetch with `credentials: 'include'`. Production must use HTTPS, a strong secret, and a trusted deployment topology. For cross-site frontend/backend hosting, configure a same-site reverse proxy or review cookie and CSRF protections before deployment. Password reset **does not send emails** yet: in development it logs a reset link; production needs a mail delivery provider. No default admin accounts are seeded: provision the first Admin via a secured operational process, not public signup.
-
-The `/api/events` GET endpoint only returns Published events. Event create/publish is Organizer-only; admin role-management is Admin-only. Registrations use MongoDB transactions. Event IDs are MongoDB ObjectIds, not the frontend's `evt-...` fixture IDs.
-
-## Collaboration
-
-See `tickets/README.md` for exact file ownership, branch names, dependency order, and PR steps. Do not upload all code as one developer's ticket PR: use the ZIP as the local reference implementation and copy only assigned files into each ticket branch. All developers branch from the latest shared backend `main`, after its bootstrap commit. One PR per ticket.
-
-## Remaining production/integration tasks
-
-- Integrate the React store with the API and adapt data shapes/IDs.
-- Implement SMTP/email delivery for password reset and frontend recovery screens.
-- Add CSRF defenses for cookie-authenticated mutation endpoints, production cookie configuration, structured logging, monitoring and security review.
-- Add MongoDB integration tests against a replica set, concurrency tests, permission tests, and end-to-end UI tests.
-- Establish a secure admin bootstrap procedure and configure deployment secrets.
-
-Backend structure:
-
-```text
-src/
-├── server.js
-├── routes/
-├── controllers/
-├── services/
-├── validators/
-└── models/
+```powershell
+npm ci
+Copy-Item .env.example .env
+npm run dev
 ```
+
+Set MONGODB_URI privately in .env to your Atlas URI including the viarena database, or a local MongoDB replica set. Transactions require a replica set. Add the backend machine's public IP to Atlas Network Access and use a database user with read/write access to viarena. Never commit credentials or .env.
+
+Health URL: http://localhost:5000/api/health. Run the frontend independently on 5173 with /api proxied to this API. Login uses HTTP-only cookies and requests include credentials. Production cookies require HTTPS.
+
+## Verify
+
+```powershell
+npm run check
+npm test
+```
+
+Tests use a disposable MongoDB replica set, not your configured database. First run downloads a binary and needs internet. scripts/browser-test-server.js is exclusively for browser tests: it seeds a disposable organizer and listens on 5001. Never deploy that test server.
+
+## First administrator
+
+With .env pointing to the intended database:
+
+```powershell
+$env:ADMIN_PASSWORD = Read-Host 'Enter a strong new admin password'
+npm run create-admin -- admin@adnu.edu.ph ADMIN-001 'Campus Administrator'
+Remove-Item Env:ADMIN_PASSWORD
+```
+
+This refuses to overwrite existing accounts. Passwords require 8�128 characters, uppercase, lowercase and a digit. Public signup creates Participant; Admin grants Organizer with an audit reason. Temporary local overrides are not production fixtures.
+
+## Hosting
+
+Deploy as a Node web service: build npm ci --omit=dev, start npm start, health path /api/health. Set NODE_ENV=production, MONGODB_URI, CLIENT_ORIGIN (frontend HTTPS URL), RESET_BASE_URL, COOKIE_NAME, SESSION_DAYS and SCHOOL_EMAIL_DOMAIN privately in your host. Let the host supply PORT. Add its outbound IP ranges to Atlas Network Access.
+
+Use the frontend production server to proxy /api to this backend. Same-origin cookies are the supported default. TRUST_PROXY_HOPS defaults to zero; use only a verified bounded proxy topology (0�5). SESSION_SECRET stays in the example environment for compatibility but is not read by the current random database-backed session-token implementation.
+
+Password-reset email delivery is not implemented. Development logs links; production needs an email provider. Stream settings store external links, not video. No multipart upload endpoint exists. See the distributed package's API documentation, master integration guide and Atlas deployment guide for complete contracts and operational checks. Older repository guides describe the pre-integration starter; this README and package documents describe the integrated implementation.
